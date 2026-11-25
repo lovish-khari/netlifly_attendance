@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Attendance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/style.css">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><div class="logo">A</div>Attendance</div>
+  <nav class="tabs"><button data-v="today" class="on">Today</button><button data-v="hist">History</button></nav>
+  <div class="secbar secbar-top" role="tablist" aria-label="Section">
+    <button data-s="anuvyom" role="tab">Anuvyom</button>
+    <button data-s="guard" role="tab">Guard</button>
+    <button data-s="aerospace" role="tab">Aerospace</button>
+  </div>
+  <div class="top-r">
+    <span id="sync" class="muted"></span>
+    <button class="btn" id="refresh" aria-label="Refresh">↻</button>
+    <a class="btn out" href="/api/logout" onclick="try{localStorage.removeItem('att_anuvyom');localStorage.removeItem('att_guard');localStorage.removeItem('att_aerospace')}catch(e){}">Sign out</a>
+  </div>
+</header>
+
+<main class="wrap">
+<div class="secbar secbar-main" role="tablist" aria-label="Section">
+  <button data-s="anuvyom" role="tab">Anuvyom</button>
+  <button data-s="guard" role="tab">Guard</button>
+  <button data-s="aerospace" role="tab">Aerospace</button>
+</div>
+<div id="v-today">
+  <section class="daybar">
+    <button class="btn" id="prev" aria-label="Previous day">‹</button>
+    <input type="date" id="day">
+    <button class="btn" id="next" aria-label="Next day">›</button>
+    <button class="btn" id="latest">Latest</button>
+    <span id="dow" class="dow"></span>
+    <input type="search" id="tq" placeholder="Find employee" class="tq">
+  </section>
+  <section class="kpis" id="tk"><div class="kpi"><span>Loading attendance…</span><b>—</b></div></section>
+  <section class="panel"><h2>All records <span class="muted" id="tcount"></span></h2>
+    <div class="scroll"><table id="t1"><thead><tr></tr></thead><tbody><tr><td colspan="7" class="empty">Loading…</td></tr></tbody></table></div></section>
+  <div class="grid2">
+    <section class="panel"><h2>Latest activity</h2><div id="feed" class="list"></div></section>
+    <section class="panel"><h2>Late arrivals <span class="muted">after 10:30 · <span id="n-late"></span></span></h2><div id="late" class="list"></div></section>
+  </div>
+</div>
+
+<div id="v-hist" hidden>
+  <section class="filters">
+    <label>From<input type="date" id="from"></label>
+    <label>To<input type="date" id="to"></label>
+    <label>Department<select id="dept"><option value="">All</option></select></label>
+    <label class="grow">Search<input type="search" id="q" placeholder="Name or ID"></label>
+    <button class="btn" id="csv">Export CSV</button>
+  </section>
+  <section class="kpis" id="hk"></section>
+  <section class="panel"><h2>Check-ins per day</h2><div class="chart"><canvas id="chart"></canvas></div></section>
+  <section class="panel"><h2>Employees <span class="muted">tap one to see their records</span></h2>
+    <div class="scroll"><table id="sum"><thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Days</th><th>Late days</th><th>Total hours</th></tr></thead><tbody></tbody></table></div></section>
+  <section class="panel"><h2>Records <span class="muted" id="count"></span></h2>
+    <div class="scroll"><table id="t2"><thead><tr></tr></thead><tbody></tbody></table></div></section>
+</div>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const COLS=['Employee ID','Name','Department','Date','Check-In','Check-Out','Total Hours'];
+const SECTIONS=['anuvyom','guard','aerospace'];
+const MON={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+const $=s=>document.querySelector(s);
+const LATE_AFTER=10*60+30; // minutes after midnight: late = check-in after 10:30
+let rows=[],chart,sortKey='Check-In',sortDir=-1,first=true,view='today',loading=true;
+let section='anuvyom';try{section=localStorage.getItem('section')||'anuvyom'}catch(e){}
+if(!SECTIONS.includes(section))section='anuvyom';
+const paintSec=()=>document.querySelectorAll('.secbar button').forEach(b=>{const on=b.dataset.s===section;b.classList.toggle('on',on);b.setAttribute('aria-selected',on)});
+paintSec();
+const clearSaved=()=>{try{SECTIONS.forEach(s=>localStorage.removeItem('att_'+s))}catch(e){}};
+
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const shift=(s,n)=>{const d=new Date(s+'T00:00:00');d.setDate(d.getDate()+n);return iso(d)};
+const pd=s=>{s=String(s||'').trim();let m;
+  if(m=s.match(/^(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{4})/)){const mo=MON[m[2].toLowerCase()];if(mo)return `${m[3]}-${pad(mo)}-${pad(m[1])}`}
+  if(m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  if(m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/))return `${m[3]}-${pad(m[2])}-${pad(m[1])}`;
+  return ''};
+const hrs=v=>{v=String(v||'').trim();if(!v)return 0;if(v.includes(':')){const[a,b]=v.split(':');return(+a||0)+(+b||0)/60}return parseFloat(v)||0};
+const tmin=s=>{const m=String(s||'').match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?/);if(!m)return null;
+  let h=+m[1];const ap=(m[3]||'').toLowerCase();if(ap==='pm'&&h<12)h+=12;if(ap==='am'&&h===12)h=0;return h*60+ +m[2]};
+const kpi=(l,v,c)=>`<div class="kpi ${c||''}"><span>${l}</span><b>${v}</b></div>`;
+const ini=n=>(String(n).trim().split(/\s+/).map(w=>w[0]).join('').slice(0,2)||'?').toUpperCase();
+
+let toastT;
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2800)}
+
+// If nothing has loaded yet, replace the "Loading…" placeholders with the error (the top-bar status is hidden on phones).
+function showErr(m){
+  loading=false;
+  if(!first)return;
+  $('#tk').innerHTML=`<div class="kpi late"><span>${esc(m)}</span><b>—</b></div>`;
+  $('#t1 tbody').innerHTML=`<tr><td colspan="7" class="empty">${esc(m)}. Tap ↻ to try again.</td></tr>`;
+  list('#feed',[],'—');list('#late',[],'—');
+}
+
+// Wrapper: shows a spinning, disabled refresh button while a manual refresh runs.
+async function load(force){
+  const b=$('#refresh');
+  if(force){b.disabled=true;b.classList.add('spin')}
+  try{await loadData(force)}finally{b.disabled=false;b.classList.remove('spin')}
+}
+
+async function loadData(force){
+  const sec=section;
+  let r;
+  try{r=await fetch('/api/attendance?section='+sec+(force?'&refresh=1':''),{cache:'no-store'})}
+  catch(e){
+    if(sec!==section)return; // section was switched while this request was in flight
+    document.body.classList.remove('pending');$('#sync').textContent='Offline';showErr('You are offline');if(force)toast('You are offline');return}
+  if(r.status===401){clearSaved();location.replace('/login.html');return}
+  document.body.classList.remove('pending');
+  let j={};try{j=await r.json()}catch(e){}
+  if(sec!==section)return; // section was switched while this request was in flight
+  if(!r.ok||!j.rows){const m=j.error||'Could not load sheet';$('#sync').textContent=m;showErr(m);if(force)toast(m);return}
+  try{localStorage.setItem('att_'+sec,JSON.stringify({rows:j.rows,fetched:j.fetched}))}catch(e){}
+  apply(j,force);
+}
+
+// Draws a payload (fresh from the server, or the copy saved in this browser).
+function apply(j,force){
+  loading=false;
+  rows=j.rows.map(x=>({...x,_d:pd(x.Date),_h:hrs(x['Total Hours']),_in:tmin(x['Check-In']),_out:tmin(x['Check-Out'])}));
+  rows.forEach(x=>{x._inside=x._in!==null&&x._out===null;x._late=x._in!==null&&x._in>LATE_AFTER});
+  const el=$('#dept'),v=el.value,set=[...new Set(rows.map(x=>x.Department).filter(Boolean))].sort();
+  el.innerHTML='<option value="">All</option>'+set.map(s=>`<option>${esc(s)}</option>`).join('');el.value=set.includes(v)?v:'';
+  const ds=rows.map(x=>x._d).filter(Boolean).sort(),latest=ds[ds.length-1]||iso(new Date());
+  if(first){const t=iso(new Date());$('#day').value=ds.includes(t)?t:latest;$('#to').value=latest;$('#from').value=shift(latest,-6);first=false}
+  $('#latest').dataset.d=latest;
+  const at=new Date(j.fetched*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  $('#sync').textContent=j.stale?at+' (old)':at;
+  if(force)toast(j.stale?'Could not reach the sheet — showing data from '+at:'Updated '+at);
+  render();
+}
+
+const list=(el,items,empty)=>$(el).innerHTML=items.length?items.map(([n,s,r,k])=>`<div class="li"><div class="av">${esc(ini(n))}</div><div class="t"><b>${esc(n)}</b><span class="muted">${esc(s)}</span></div><span class="pill ${k||''}">${esc(r)}</span></div>`).join(''):`<p class="empty">${empty}</p>`;
+
+function drawTable(sel,data,limit){
+  const th=$(sel+' thead tr');
+  th.innerHTML=COLS.map(h=>`<th data-k="${h}" class="${h===sortKey?'sorted':''}">${h}${h===sortKey?(sortDir>0?' ↑':' ↓'):''}</th>`).join('');
+  th.querySelectorAll('th').forEach(el=>el.onclick=()=>{const k=el.dataset.k;sortDir=k===sortKey?-sortDir:1;sortKey=k;render()});
+  const v=x=>sortKey==='Date'?x._d:sortKey==='Total Hours'?x._h:sortKey==='Check-In'?(x._in??-1):sortKey==='Check-Out'?(x._out??-1):String(x[sortKey]).toLowerCase();
+  data=[...data].sort((a,b)=>v(a)>v(b)?sortDir:v(a)<v(b)?-sortDir:0).slice(0,limit);
+  $(sel+' tbody').innerHTML=data.length?data.map(x=>`<tr>${COLS.map(h=>`<td data-label="${h}"${h==='Check-In'&&x._late?' class="lt"':''}>${esc(x[h]||'—')}</td>`).join('')}</tr>`).join('')
+    :`<tr><td colspan="7" class="empty">No records found.</td></tr>`;
+}
+
+// While a section's data hasn't arrived yet (first load or just switched), show "Loading…" instead of zeros.
+function loadingUI(){
+  $('#tk').innerHTML='<div class="kpi"><span>Loading attendance…</span><b>—</b></div>';
+  $('#t1 tbody').innerHTML='<tr><td colspan="7" class="empty">Loading…</td></tr>';
+  list('#feed',[],'Loading…');list('#late',[],'Loading…');
+  $('#tcount').textContent='';$('#n-late').textContent='';
+  $('#hk').innerHTML='<div class="kpi"><span>Loading attendance…</span><b>—</b></div>';
+  $('#sum tbody').innerHTML='<tr><td colspan="6" class="empty">Loading…</td></tr>';
+  $('#t2 tbody').innerHTML='<tr><td colspan="7" class="empty">Loading…</td></tr>';
+  $('#count').textContent='';
+}
+
+function renderToday(){
+  if(loading&&!rows.length){loadingUI();return}
+  const day=$('#day').value,q=$('#tq').value.toLowerCase().trim();
+  const data=rows.filter(x=>x._d===day&&(!q||x.Name.toLowerCase().includes(q)||x['Employee ID'].toLowerCase().includes(q)));
+  $('#dow').textContent=day?new Date(day+'T00:00:00').toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'short'}):'';
+  const late=data.filter(x=>x._late).sort((a,b)=>a._in-b._in);
+  $('#tk').innerHTML=kpi('Checked in',data.length,'hl')+kpi('Checked out',data.filter(x=>x._out!==null).length,'bl')+kpi('Late',late.length,'late');
+  $('#n-late').textContent=late.length;
+  list('#late',late.map(x=>[x.Name,x.Department||'',x['Check-In'],'late']),'No late arrivals.');
+  const ev=[];data.forEach(x=>{if(x._in!==null)ev.push({t:x._in,x,s:x['Check-In'],k:'in'});if(x._out!==null)ev.push({t:x._out,x,s:x['Check-Out'],k:'out'})});
+  ev.sort((a,b)=>b.t-a.t);
+  list('#feed',ev.slice(0,40).map(e=>[e.x.Name,(e.x.Department||'')+' · '+e.s,e.k==='in'?'IN':'OUT',e.k==='in'?'in':'']),'No activity yet.');
+  $('#tcount').textContent=data.length;
+  drawTable('#t1',data,1000);
+}
+
+function filtered(){
+  const f=$('#from').value,t=$('#to').value,d=$('#dept').value,q=$('#q').value.toLowerCase().trim();
+  return rows.filter(x=>(!f||x._d>=f)&&(!t||x._d<=t)&&(!d||x.Department===d)&&(!q||x.Name.toLowerCase().includes(q)||x['Employee ID'].toLowerCase().includes(q)));
+}
+
+function renderHist(){
+  if(loading&&!rows.length){loadingUI();return}
+  const data=filtered(),days=[...new Set(data.map(x=>x._d).filter(Boolean))].sort();
+  $('#hk').innerHTML=kpi('Records',data.length,'hl')+kpi('Employees',new Set(data.map(x=>x['Employee ID'])).size,'bl')+kpi('Days',days.length);
+  if(chart){chart.destroy();chart=null}
+  if(window.Chart){   // the chart library loads from a CDN; skip the chart if it failed to load
+    Chart.defaults.color='#8b96a5';Chart.defaults.borderColor='#232b36';Chart.defaults.font.family='Inter,sans-serif';
+    chart=new Chart($('#chart'),{type:'bar',data:{labels:days.map(d=>d.slice(5)),datasets:[{label:'Check-ins',backgroundColor:'#3fb68b',borderRadius:6,data:days.map(d=>data.filter(x=>x._d===d).length)}]},
+      options:{maintainAspectRatio:false,scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{grid:{display:false}}},plugins:{legend:{display:false}}}});
+  }
+  const e={};data.forEach(x=>{const o=e[x['Employee ID']]=e[x['Employee ID']]||{id:x['Employee ID'],n:x.Name,d:x.Department,days:new Set(),late:0,h:0};o.days.add(x._d);if(x._late)o.late++;o.h+=x._h});
+  $('#sum tbody').innerHTML=Object.values(e).sort((a,b)=>a.n.localeCompare(b.n)).map(o=>
+    `<tr data-id="${esc(o.id)}"><td data-label="ID">${esc(o.id)}</td><td data-label="Name">${esc(o.n)}</td><td data-label="Department">${esc(o.d||'—')}</td><td data-label="Days">${o.days.size}</td><td data-label="Late days">${o.late}</td><td data-label="Total hours">${o.h.toFixed(1)}</td></tr>`).join('')
+    ||'<tr><td colspan="6" class="empty">No records in this range.</td></tr>';
+  $('#sum tbody').querySelectorAll('tr[data-id]').forEach(tr=>tr.onclick=()=>{$('#q').value=tr.dataset.id;render();$('#t2').scrollIntoView({behavior:'smooth'})});
+  $('#count').textContent=data.length>500?`showing 500 of ${data.length}`:data.length;
+  drawTable('#t2',data,500);
+}
+
+const render=()=>view==='today'?renderToday():renderHist();
+function show(v){view=v;$('#v-today').hidden=v!=='today';$('#v-hist').hidden=v!=='hist';
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  sortKey=v==='today'?'Check-In':'Date';sortDir=-1;render();scrollTo(0,0)}
+
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>show(b.dataset.v));
+$('#prev').onclick=()=>{$('#day').value=shift($('#day').value||$('#latest').dataset.d,-1);render()};
+$('#next').onclick=()=>{$('#day').value=shift($('#day').value||$('#latest').dataset.d,1);render()};
+$('#latest').onclick=()=>{$('#day').value=$('#latest').dataset.d;render()};
+['day','from','to','dept'].forEach(id=>$('#'+id).onchange=render);
+$('#q').oninput=render;$('#tq').oninput=render;
+$('#refresh').onclick=()=>load(true);
+
+// Switching section: clear this section's state, show its saved copy straight away, then fetch fresh data.
+document.querySelectorAll('.secbar button').forEach(b=>b.onclick=()=>{
+  if(b.dataset.s===section)return;
+  section=b.dataset.s;try{localStorage.setItem('section',section)}catch(x){}
+  paintSec();rows=[];first=true;loading=true;$('#q').value='';$('#tq').value='';$('#dept').value='';
+  $('#sync').textContent='Loading…';render();showCached();load();
+});
+
+$('#csv').onclick=()=>{
+  // quote every cell, and neutralise cells that Excel would treat as formulas
+  const q=v=>{v=String(v);if(/^[=+\-@\t\r]/.test(v))v="'"+v;return `"${v.replace(/"/g,'""')}"`};
+  const csv='\uFEFF'+[COLS.map(q).join(',')].concat(filtered().map(x=>COLS.map(h=>q(x[h])).join(','))).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`attendance-${section}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
+
+// Show the last data this browser saw straight away, then refresh it in the background.
+function showCached(){
+  try{const c=JSON.parse(localStorage.getItem('att_'+section)||'null');
+    if(c&&Array.isArray(c.rows)){apply({rows:c.rows,fetched:c.fetched,stale:false},false);$('#sync').textContent+=' (saved)'}}catch(e){}
+}
+document.body.classList.remove('pending');
+showCached();
+load();
+setInterval(()=>{if(!document.hidden)load()},30000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)load()});
+</script>
+</body>
+</html>

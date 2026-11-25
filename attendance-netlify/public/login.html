@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Sign in · Attendance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="auth-wrap">
+  <section class="auth-hero">
+    <div class="logo">A</div>
+    <h1>Attendance</h1>
+    <p>Live check-ins and daily attendance for Anuvyom Aerospace.</p>
+  </section>
+  <main class="auth-card">
+    <h2 id="hi">Welcome</h2>
+    <span class="muted">Sign in to view today's attendance.</span>
+    <form id="f">
+      <label>Username<input name="username" required autofocus autocomplete="username" autocapitalize="none"></label>
+      <label>Password<span class="pw"><input name="password" id="pw" type="password" required autocomplete="current-password"><button type="button" id="tg">Show</button></span></label>
+      <p class="err" id="err" role="alert"></p>
+      <button class="btn primary" type="submit">Sign in</button>
+    </form>
+  </main>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+// "Welcome back" only for browsers that have signed in before; first-timers see "Welcome".
+try{if(localStorage.getItem('signedInBefore'))$('hi').textContent='Welcome back'}catch(e){}
+$('tg').onclick=()=>{const s=$('pw').type==='password';$('pw').type=s?'text':'password';$('tg').textContent=s?'Hide':'Show'};
+$('f').onsubmit=async e=>{
+  e.preventDefault();
+  const b=e.target.querySelector('.primary');b.disabled=true;b.textContent='Signing in…';$('err').textContent='';
+  try{
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});
+    if(r.ok){try{localStorage.setItem('signedInBefore','1')}catch(e){}location='/';return}
+    $('err').textContent=(await r.json().catch(()=>({}))).error||'Sign in failed.';
+  }catch(x){$('err').textContent='Network error. Try again.'}
+  b.disabled=false;b.textContent='Sign in';
+};
+</script>
+</body>
+</html>
