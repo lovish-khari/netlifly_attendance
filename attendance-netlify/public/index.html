@@ -47,7 +47,7 @@
     <div class="scroll"><table id="t1"><thead><tr></tr></thead><tbody><tr><td colspan="7" class="empty">Loading…</td></tr></tbody></table></div></section>
   <div class="grid2">
     <section class="panel"><h2>Latest activity</h2><div id="feed" class="list"></div></section>
-    <section class="panel"><h2>Late arrivals <span class="muted">after 10:30 · <span id="n-late"></span></span></h2><div id="late" class="list"></div></section>
+    <section class="panel"><h2>Late arrivals <span class="muted">after 10:00 · <span id="n-late"></span></span></h2><div id="late" class="list"></div></section>
   </div>
 </div>
 
@@ -74,7 +74,7 @@ const COLS=['Employee ID','Name','Department','Date','Check-In','Check-Out','Tot
 const SECTIONS=['anuvyom','guard','aerospace'];
 const MON={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
 const $=s=>document.querySelector(s);
-const LATE_AFTER=10*60+30; // minutes after midnight: late = check-in after 10:30
+const LATE_AFTER=10*60; // minutes after midnight: late = check-in after 10:00
 let rows=[],chart,sortKey='Check-In',sortDir=-1,first=true,view='today',loading=true;
 let section='anuvyom';try{section=localStorage.getItem('section')||'anuvyom'}catch(e){}
 if(!SECTIONS.includes(section))section='anuvyom';
